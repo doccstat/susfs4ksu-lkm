@@ -2,6 +2,12 @@
 
 # susfs4ksu-lkm
 
+> **Fork build status:** this fork builds a pinned experimental android16-6.12
+> LKM, not a boot image or an approved device installer. See
+> [BUILDING.md](BUILDING.md) for GitHub CI, reproduction checks and limitations.
+> Upstream loading/unloading instructions below are reference material, not a
+> tested recovery procedure; do not hot-unload KernelSU beneath this module.
+
 A loadable kernel module (LKM) port of SUSFS: run susfs without recompiling the kernel.
 
 ## Loading

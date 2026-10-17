@@ -45,6 +45,7 @@ jobs:
   # `dev` preview branch only; `main` now ships it too, so all eight variants are BLOCKING - a red 6.12 or 6.18 build
   # fails this workflow instead of being tolerated as experimental.
   module:
+    if: github.repository == 'inforcqb/susfs4ksu-lkm'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -617,6 +618,7 @@ jobs:
   # tool FAILS this job on purpose: it is the evidence-gathering half of this project, and a tool that cannot compile or
   # that reads the ABI wrong is how "verified" becomes wrong.
   tools:
+    if: github.repository == 'inforcqb/susfs4ksu-lkm'
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/ylarod/ddk-min:android14-6.1-20260828
@@ -852,6 +854,7 @@ jobs:
   # no release existing yet.  Attaching the same ZIP to a published release is still done by
   # module-zip.yml, which calls the same tools/pack_module.py - one packer, two callers.
   module-zip:
+    if: github.repository == 'inforcqb/susfs4ksu-lkm'
     needs: [module, tools]
     runs-on: ubuntu-latest
     permissions:
