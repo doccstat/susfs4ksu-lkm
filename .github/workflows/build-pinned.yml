@@ -1,0 +1,61 @@
+name: Build pinned SUSFS LKM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'kernel/**'
+      - 'tools/**'
+      - 'module/**'
+      - 'config/build.env'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'kernel/**'
+      - 'tools/**'
+      - 'module/**'
+      - 'config/build.env'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Host checks (no kernel operations)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONDONTWRITEBYTECODE=1
+          export TMPDIR="$HOME/.cache/susfs4ksu-lkm/tests"
+          mkdir -p "$TMPDIR"
+          python3 -m unittest discover -v -s tools -p 'test_build.py'
+          python3 tools/test_pack.py
+          for file in module/*.sh; do sh -n "$file"; done
+          cc -O1 -o "$TMPDIR/insmod_match_test" tools/insmod_match_test.c
+          "$TMPDIR/insmod_match_test"
+      - name: Build twice and compare raw artifacts
+        id: build
+        run: bash tools/build-pinned.sh
+      - name: Upload accepted raw binaries and provenance (not an installer)
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        with:
+          name: susfs-android16-6.12-${{ github.sha }}
+          path: ${{ steps.build.outputs.work }}/artifacts/
+          if-no-files-found: error
+      - name: Retain build diagnostics even on failure
+        if: ${{ always() && steps.build.outputs.work != '' }}
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        with:
+          name: susfs-build-logs-${{ github.sha }}
+          path: ${{ steps.build.outputs.work }}/pass-*.log
+          if-no-files-found: warn
