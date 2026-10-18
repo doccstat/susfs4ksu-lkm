@@ -210,6 +210,10 @@ class BuildTests(unittest.TestCase):
                 self.assertNotIn('pull_request_target', text)
                 self.assertNotIn('secrets.', text)
                 self.assertNotIn('--privileged', text)
+                package_step = text.index('name: Package the accepted build (no device operations)')
+                self.assertLess(text.index('run: bash tools/build-pinned.sh'), package_step)
+                self.assertLess(package_step, text.index('name: Upload installable experimental module'))
+                self.assertIn("--build-artifacts '${{ steps.build.outputs.work }}/artifacts'", text)
                 for action in re.findall(r'uses: (\S+)', text):
                     self.assertRegex(action, r'@[0-9a-f]{40}$')
             else:

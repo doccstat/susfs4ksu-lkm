@@ -35,14 +35,16 @@ Artifacts contain:
 
 The upstream CFI call-site gate, architecture/vermagic/namespace checks and
 forbidden-import checks must pass. Host tests use mock commands and never load
-kernel code. The first real CI build is still required: configured gates are
-not evidence that compilation or reproduction has already passed.
+kernel code. [Run 39079657465](https://github.com/doccstat/susfs4ksu-lkm/actions/runs/39079657465)
+passed the real two-build gate for `5a1bc82d6bd5e163a18e72fc4305f00bad5bddbc`.
+Each later revision still needs its own successful run.
 
 Two identical outputs establish reproduction for those fixed inputs, **not**
 universal reproducibility across other kernels/toolchains, ABI compatibility,
 complete SUSFS functionality or device safety. `SHA256SUMS` identifies the
-uncompressed payloads; GitHub's artifact transport ZIP is not compared. No
-installer ZIP or GitHub release is generated, and nothing is installed or flashed.
+uncompressed payloads; GitHub's artifact transport ZIP is not compared. The
+workflow also packages a separate experimental KernelSU module ZIP after these
+gates. No GitHub release, device installation or flashing is performed.
 
 ## Local reproduction
 
@@ -69,6 +71,49 @@ python3 tools/test_pack.py
 cc -O1 -o "$TMPDIR/insmod_match_test" tools/insmod_match_test.c
 "$TMPDIR/insmod_match_test"
 ```
+
+## Installable module ZIP
+
+Download the separate `susfs-module-android16-6.12-<commit>` artifact and extract
+the **inner `*-module.zip`** before selecting it in a KernelSU-compatible manager.
+The raw `susfs-android16-6.12-<commit>` artifact is still not an installer.
+
+To package an already verified raw build without rebuilding it, use a source
+checkout whose kernel, loader and module scripts match that build:
+
+```sh
+python3 tools/pack_module.py \
+  --build-artifacts "$HOME/.cache/susfs4ksu-lkm/verified-artifacts" \
+  --tag ci-5a1bc82d \
+  --out "$HOME/.cache/susfs4ksu-lkm/susfs-android16-6.12-ci-5a1bc82d-module.zip"
+```
+
+The packer checks complete input checksums, pinned build provenance, runtime
+source identity and ELF headers. It preserves the supplied tag, refuses existing
+output files and packages only the recorded KMI. ZIP ordering, modes and timestamps
+are deterministic; `versionCode` defaults to the source epoch (`--epoch` explicitly
+overrides it). Checksums are integrity checks, **not signatures**: authenticate the
+original build/download separately. The legacy `--ko-dir`/`--insmod` interface is
+retained, but cannot claim pinned-build verification.
+
+The ZIP includes exact binary source (`source.tar`), GPL license, the packaging
+script, build provenance and payload checksums. To reproduce packaging, unpack
+`source.tar` into a cache-only checkout and replace its `tools/pack_module.py` with
+`packaging/pack_module.py`; use the included `BUILDING.md` and original raw build
+artifacts. Identical ZIP bytes require the same Python/zlib implementation too.
+
+**Installation stages files; it does not load the LKM.** Upstream loading behavior
+is unchanged: module `post-fs-data` by default, optional common dispatcher only
+with the documented `early_load` setting. No `early_load`, rules, `late-load.sh`,
+service restart or installer-time loading is added. Existing `early_load` is
+preserved by upstream installation. A late-loaded root provider may not execute
+ordinary `post-fs-data`; this ZIP does not authorize manually replaying stages.
+
+This is a packaging-validated **experimental** module, not a device-safety
+certification. The existing proc/sysfs absence heuristic is not an authoritative
+protocol/serialization guard, and the optional early dispatcher can select a
+staged update. Do not enable that optional path for an unvalidated lifecycle.
+Provider lifetime, feature acceptance and recovery remain requirements below.
 
 ## Before any device trial
 
