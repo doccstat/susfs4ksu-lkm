@@ -25,5 +25,20 @@ KO="$MODDIR/lib/susfs_guard_lkm-$KMI.ko"
 echo "kernel $REL -> $KMI"
 "$MODDIR/bin/susfs_insmod" "$KO" expose_proc=1
 rc=$?
-[ "$rc" = 0 ] && echo "loader completed; see above for loaded/skipped status." || echo "susfs_insmod failed: $rc"
+if [ "$rc" = 0 ]; then
+  # The hide_mounts prefix list is runtime state and this module is late-loaded, so
+  # susfs4ksu's post-mount hook never sees Vector's dex2oat64 overlay. Arm the non-su
+  # hide and add the prefix once the module is live. The add rescans this namespace,
+  # so it only works when the overlay already exists (late-load); a boot-time load
+  # before the overlay would need a wait or the A17 zygote path, not this list.
+  if [ -x /data/adb/ksu/bin/ksu_susfs ]; then
+    /data/adb/ksu/bin/ksu_susfs hide_sus_mnts_for_non_su_procs 1
+  fi
+  if [ -w /proc/susfs_hide_mounts ]; then
+    printf 'add /apex/com.android.art/bin/dex2oat64\n' > /proc/susfs_hide_mounts
+  fi
+  echo "loader completed; see above for loaded/skipped status."
+else
+  echo "susfs_insmod failed: $rc"
+fi
 exit "$rc"
