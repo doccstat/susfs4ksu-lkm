@@ -40,9 +40,12 @@ jobs:
           mkdir -p "$TMPDIR"
           python3 -m unittest discover -v -s tools -p 'test_build.py'
           python3 tools/test_pack.py
+          python3 tools/test_load.py
           for file in module/*.sh; do sh -n "$file"; done
           cc -O1 -o "$TMPDIR/insmod_match_test" tools/insmod_match_test.c
           "$TMPDIR/insmod_match_test"
+          cc -O1 -o "$TMPDIR/insmod_guard_test" tools/insmod_guard_test.c
+          "$TMPDIR/insmod_guard_test" "$TMPDIR/susfs-load.lock"
       - name: Build twice and compare raw artifacts
         id: build
         run: bash tools/build-pinned.sh

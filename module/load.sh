@@ -7,13 +7,15 @@ MODDIR=${0%/*}
 [ "$(getprop persist.sys.safemode)" != 1 ] || exit 0
 [ "$(getprop ro.sys.safemode)" != 1 ] || exit 0
 umask 077
-exec >"$MODDIR/load.log" 2>&1
+# A competing invocation must not truncate the owner's diagnostics.
+exec >>"$MODDIR/load.log" 2>&1
 echo "susfs_guard_lkm loader: $(date)"
-# The /proc control nodes exist only while sus_path's LSM layer is installed, so
-# their presence means susfs is already up (built-in or an earlier load). Do not stack.
-if [ -e /proc/susfs_path ] || [ -d /sys/module/susfs_guard_lkm ]; then
-  echo "susfs already present; nothing to do."
-  exit 0
+case "$MODDIR" in
+  /data/adb/modules_update/*) echo "refusing to load a staged update"; exit 1 ;;
+esac
+if [ -e /data/adb/modules_update/susfs_guard_lkm ] || [ -e "$MODDIR/update" ]; then
+  echo "SUSFS update pending; leave activation to a normal reboot"
+  exit 1
 fi
 REL=$(cat /proc/sys/kernel/osrelease) || { echo "cannot read kernel release"; exit 1; }
 . "$MODDIR/kmi.sh"
@@ -23,5 +25,5 @@ KO="$MODDIR/lib/susfs_guard_lkm-$KMI.ko"
 echo "kernel $REL -> $KMI"
 "$MODDIR/bin/susfs_insmod" "$KO" expose_proc=1
 rc=$?
-[ "$rc" = 0 ] && echo "loaded." || echo "susfs_insmod failed: $rc"
+[ "$rc" = 0 ] && echo "loader completed; see above for loaded/skipped status." || echo "susfs_insmod failed: $rc"
 exit "$rc"

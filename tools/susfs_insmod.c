@@ -81,11 +81,17 @@ typedef __INTPTR_TYPE__ sysarg;
 #define SYS_lseek	62
 #define SYS_mmap	222
 #define SYS_init_module	105
+#define SYS_flock	32
+#define SYS_reboot	142
+#define SYS_geteuid	175
 
 #define AT_FDCWD	(-100)
 #define O_RDONLY	0
 #define O_WRONLY	1
 #define O_NONBLOCK	0x800
+#define O_CREAT		0x40
+#define O_NOFOLLOW	0x8000 /* arm64 asm/fcntl.h, not the x86 value */
+#define O_CLOEXEC	0x80000
 #define SEEK_END	2
 #define PROT_READ	1
 #define PROT_WRITE	2
@@ -287,6 +293,55 @@ static void die2(const char *msg, const char *what, sysarg err)
 	}
 	o_nl();
 	finish((int)(-err));
+}
+
+/* 1: a SUSFS reply, 0: both queries rejected as invalid magic, -1: cannot tell. */
+static int susfs_present(void)
+{
+	static const u32 commands[] = { 0x555e1, 0x555e3 }; /* version, variant */
+	u32 i, j;
+
+	for (i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
+		struct { char text[16]; int err; } reply = { {0}, 126 };
+		sysarg ret = sys6(SYS_reboot, 0xdeadbeef, 0xfafafafa, commands[i],
+				 (sysarg)&reply, 0, 0);
+
+		/* Any reply forbids stacking, even an unknown version or an error. */
+		if (reply.err != 126)
+			return 1;
+		for (j = 0; j < sizeof(reply.text); j++)
+			if (reply.text[j])
+				return 1;
+		if (ret != -22) /* EINVAL; denial/ENOSYS/silent success are ambiguous. */
+			return -1;
+	}
+	return 0;
+}
+
+static void guard_load(void)
+{
+	sysarg fd, ret;
+	int present;
+
+	if (sys6(SYS_geteuid, 0, 0, 0, 0, 0, 0) != 0)
+		die("root is required to establish SUSFS absence", 0);
+	/* Keep this inode: flock ownership dies with the process, not a PID file. */
+	fd = sys6(SYS_openat, AT_FDCWD, (sysarg)"/data/adb/.susfs_guard_lkm.lock",
+		  O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600, 0, 0);
+	if (fd < 0)
+		die("cannot open the SUSFS load lock", fd);
+	ret = sys6(SYS_flock, fd, 2 | 4, 0, 0, 0, 0); /* LOCK_EX | LOCK_NB */
+	if (ret < 0)
+		die("cannot acquire SUSFS load ownership; another load may be running", ret);
+	/* fd stays open through loading, the final probe and kptr restoration. */
+	present = susfs_present();
+	if (present < 0)
+		die("cannot establish SUSFS absence; refusing to load", 0);
+	if (present) {
+		o_put(P "SUSFS already responds; skipping load (not a feature-health check)\n");
+		o_flush();
+		finish(0);
+	}
 }
 
 /* -------------------------------------------------------------------------- *
@@ -850,6 +905,7 @@ void insmod_main(long argc, char **argv)
 		plen += alen;
 	}
 	params[plen] = 0;
+	guard_load();
 	/* ---- map the module image read/write private ---- */
 	fd = sys6(SYS_openat, AT_FDCWD, (sysarg)path, O_RDONLY, 0, 0, 0);
 	if (fd < 0)
@@ -1265,6 +1321,8 @@ void insmod_main(long argc, char **argv)
 		o_flush();
 	}
 
+	if (susfs_present() != 1)
+		die("init_module succeeded but SUSFS did not answer; refusing to report success", 0);
 	finish(0);
 }
 
