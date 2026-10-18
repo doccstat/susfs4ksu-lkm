@@ -68,8 +68,11 @@ export PYTHONDONTWRITEBYTECODE=1
 mkdir -p "$TMPDIR"
 python3 -m unittest discover -v -s tools -p 'test_build.py'
 python3 tools/test_pack.py
+python3 tools/test_load.py
 cc -O1 -o "$TMPDIR/insmod_match_test" tools/insmod_match_test.c
 "$TMPDIR/insmod_match_test"
+cc -O1 -o "$TMPDIR/insmod_guard_test" tools/insmod_guard_test.c
+"$TMPDIR/insmod_guard_test" "$TMPDIR/susfs-load.lock"
 ```
 
 ## Installable module ZIP
@@ -102,18 +105,31 @@ script, build provenance and payload checksums. To reproduce packaging, unpack
 `packaging/pack_module.py`; use the included `BUILDING.md` and original raw build
 artifacts. Identical ZIP bytes require the same Python/zlib implementation too.
 
-**Installation stages files; it does not load the LKM.** Upstream loading behavior
-is unchanged: module `post-fs-data` by default, optional common dispatcher only
-with the documented `early_load` setting. No `early_load`, rules, `late-load.sh`,
-service restart or installer-time loading is added. Existing `early_load` is
-preserved by upstream installation. A late-loaded root provider may not execute
-ordinary `post-fs-data`; this ZIP does not authorize manually replaying stages.
+**Installation stages files; it does not load the LKM.** The default entry remains
+module `post-fs-data`; the optional common dispatcher still requires `early_load`.
+Neither entry loads a staged update, and a pending SUSFS update blocks loading
+until normal reboot processing. Existing `early_load` is preserved, but the ZIP
+does not enable it, add rules, replay stages or restart Android.
 
-This is a packaging-validated **experimental** module, not a device-safety
-certification. The existing proc/sysfs absence heuristic is not an authoritative
-protocol/serialization guard, and the optional early dispatcher can select a
-staged update. Do not enable that optional path for an unvalidated lifecycle.
-Provider lifetime, feature acceptance and recovery remain requirements below.
+All entries use the same native loader guard. It requires root, holds a
+nonblocking kernel `flock` on `/data/adb/.susfs_guard_lkm.lock` through loading and
+cleanup, and queries the SUSFS version/variant reboot-syscall interface before
+reading the LKM or changing `kptr_restrict`. Any reply skips insertion; only two
+untouched `EINVAL` replies permit it. Denial, `ENOSYS`, silent success or lock
+failure refuse loading. A successful insertion must also produce a protocol
+reply. This is not a feature-health or compatibility check. Keep the lock inode;
+process death releases ownership without deleting it. Arbitrary other loaders
+do not participate in this lock.
+
+A framework-only restart retains the running kernel, KernelSU and any loaded
+SUSFS; repeated module stages therefore skip insertion. A full reboot discards
+both LKMs. For temporary-root workflows, establish KernelSU first after reboot,
+then use the existing lifecycle owner for module stages. There is no new restart
+owner, live replacement procedure or retry supervisor here.
+
+These guards require a **new loader build and package**; previously delivered
+artifacts do not gain them through a documentation update. This remains an
+experimental module, not a device-safety certification.
 
 ## Before any device trial
 
@@ -123,8 +139,12 @@ running kernel's layouts, prototypes, symbols and CFI configuration. Keep rules,
 stage ordering, absence detection and a non-autoload recovery plan explicit.
 
 The current source retains a KernelSU function pointer without pinning its
-provider. **Do not unload or hot-replace KernelSU while SUSFS is loaded.** A
-load-success message also does not prove that every optional feature initialized.
+provider. The supported lifetime is KernelSU first, then SUSFS, with both retained
+until full reboot; a framework-only restart does not violate it. **Live KernelSU
+unload/replacement remains unsupported and is not blocked by this loader.** Do
+not use `ksud unload` or hot-unload SUSFS for recovery; disable it before the next
+load and use a full reboot. A load-success message also does not prove that every
+optional feature initialized.
 The retained upstream boot scripts and unload examples are not an approved
 integration or recovery procedure for this experimental build. Device changes
 require a separate, deliberate test window.
