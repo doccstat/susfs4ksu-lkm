@@ -26,11 +26,10 @@ echo "kernel $REL -> $KMI"
 "$MODDIR/bin/susfs_insmod" "$KO" expose_proc=1
 rc=$?
 if [ "$rc" = 0 ]; then
-  # The hide_mounts prefix list is runtime state and this module is late-loaded, so
-  # susfs4ksu's post-mount hook never sees Vector's dex2oat64 overlay. Arm the non-su
-  # hide and add the prefix once the module is live. The add rescans this namespace,
-  # so it only works when the overlay already exists (late-load); a boot-time load
-  # before the overlay would need a wait or the A17 zygote path, not this list.
+  # The hide_mounts prefix list is runtime state and this module may load before
+  # Vector's dex2oat64 overlay. Arm the non-su hide and add the prefix once the
+  # module is live; the attach_recursive_mnt kretprobe records mounts that appear
+  # later and matches them by filesystem identity, so boot order is covered.
   if [ -x /data/adb/ksu/bin/ksu_susfs ]; then
     /data/adb/ksu/bin/ksu_susfs hide_sus_mnts_for_non_su_procs 1
   fi
