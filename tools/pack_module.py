@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 import re
 import struct
+import subprocess
 import tarfile
 import zipfile
 
@@ -85,6 +86,14 @@ def check_elf(path, elf_type):
     if (path.is_symlink() or len(data) < 64 or data[:7] != b"\x7fELF\x02\x01\x01"
             or struct.unpack_from("<HH", data, 16) != (elf_type, 183)):
         raise SystemExit(f"not the expected ELF64 little-endian AArch64 payload: {path.name}")
+    if elf_type == 3:
+        try:
+            report = subprocess.run(["readelf", "-W", "-l", "-r", "-d", "--", str(path)],
+                                    check=True, capture_output=True, text=True).stdout
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise SystemExit(f"cannot validate loader with readelf: {error}")
+        if re.search(r"R_AARCH64_|\((?:RELA?|RELR|JMPREL)\)|^\s*INTERP\s", report, re.M):
+            raise SystemExit("loader needs runtime relocations or an interpreter; _start provides neither")
 
 
 def main():

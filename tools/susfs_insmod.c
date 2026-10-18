@@ -133,8 +133,7 @@ static int verbose;
 
 /* Defined below.  o_flush() must go through it instead of calling SYS_exit directly: a failed
  * stdout write (EPIPE - `susfs_insmod x.ko | head`, a reader that went away, a closed fd)
- * would otherwise leave /proc/sys/kernel/kptr_restrict at the 0 this tool wrote, i.e. kernel
- * addresses readable by every process on the device until the next reboot. */
+ * would otherwise leave /proc/sys/kernel/kptr_restrict relaxed after this tool exits. */
 static void finish(int code);
 
 static void o_flush(void)
@@ -490,9 +489,7 @@ static u64 ks_dotted;		/* names with a '.' - not matchable by this tool */
 static u64 ks_abs_type;		/* type a/A: absolute symbols, not addresses */
 static u64 ks_module;		/* module symbols: another module's image, not the kernel's */
 
-/* Save kptr_restrict and set it to 0, the way ksud does (it writes 1; root sees
- * real addresses at both values, the kernel's kallsyms_show_value() falls through
- * to the CAP_SYSLOG test).  Called before the first kallsyms read. */
+/* Use CAP_SYSLOG-gated visibility, not world-readable addresses; restore on normal exit. */
 static void kptr_relax(void)
 {
 	sysarg fd;
@@ -527,8 +524,8 @@ static void kptr_relax(void)
 		o_flush();
 		return;
 	}
-	if (sys6(SYS_write, fd, (sysarg)"0", 1, 0, 0, 0) < 0) {
-		o_put(P "note: writing 0 to kptr_restrict failed - continuing\n");
+	if (sys6(SYS_write, fd, (sysarg)"1", 1, 0, 0, 0) != 1) {
+		o_put(P "note: writing 1 to kptr_restrict failed - continuing\n");
 		o_flush();
 	}
 	sys6(SYS_close, fd, 0, 0, 0, 0, 0);
@@ -539,7 +536,7 @@ static void kptr_relax(void)
 		while (kptr_orig_len && (kptr_orig[kptr_orig_len - 1] == '\n' ||
 					 kptr_orig[kptr_orig_len - 1] == ' '))
 			kptr_orig[--kptr_orig_len] = 0;
-		o_put("\"; set to 0 for this run (restored on exit)\n");
+		o_put("\"; requested 1 for this run (restored on normal exit)\n");
 		o_flush();
 	}
 }
@@ -740,7 +737,8 @@ static void kmsg_read_new(sysarg fd)
 	kbuf[kbuf_len] = 0;
 }
 
-static const char *const kmsg_interesting[] = {
+/* _start has no relocator: keep the table pointer-free even in a static PIE. */
+static const char kmsg_interesting[][24] = {
 	"Unknown symbol",
 	"version magic",
 	"does not import it",

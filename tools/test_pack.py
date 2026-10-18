@@ -19,7 +19,22 @@ ROOT = Path(__file__).resolve().parents[1]
 def elf(kind):
     data = bytearray(64)
     data[:7] = b"\x7fELF\x02\x01\x01"
-    struct.pack_into("<HH", data, 16, kind, 183)
+    struct.pack_into("<HHI", data, 16, kind, 183, 1)
+    struct.pack_into("<HHHHHH", data, 52, 64, 56, 0, 64, 0, 0)
+    return data
+
+
+def relocated_loader():
+    data = elf(3)
+    struct.pack_into("<Q", data, 40, 64)  # section table
+    struct.pack_into("<H", data, 60, 4)
+    data.extend(bytes(64))  # null section
+    for kind, offset, size, link, info, entry in ((4, 320, 24, 2, 0, 24),
+                                                (11, 344, 24, 3, 1, 24),
+                                                (3, 368, 1, 0, 0, 0)):
+        data.extend(struct.pack("<IIQQQQIIQQ", 0, kind, 2, 0, offset, size, link, info, 8, entry))
+    data.extend(struct.pack("<QQq", 0, 1027, 0))  # R_AARCH64_RELATIVE
+    data.extend(bytes(25))  # null dynamic symbol and string
     return data
 
 
@@ -172,6 +187,25 @@ class PackagingTests(unittest.TestCase):
         self.out.write_bytes(b"keep this")
         self.assertNotEqual(self.legacy().returncode, 0)
         self.assertEqual(self.out.read_bytes(), b"keep this")
+
+    def test_loader_runtime_relocations_and_interpreter_refused(self):
+        interpreter = elf(3)
+        struct.pack_into("<Q", interpreter, 32, 64)
+        struct.pack_into("<H", interpreter, 56, 1)
+        interpreter.extend(struct.pack("<IIQQQQQQ", 3, 4, 120, 0, 0, 7, 7, 1))
+        interpreter.extend(b"/ld.so\0")
+        for data in (relocated_loader(), interpreter):
+            with self.subTest(kind="relocation" if data != interpreter else "interpreter"):
+                (self.assets / "susfs_insmod").write_bytes(data)
+                result = self.legacy()
+                self.assertIn("loader needs runtime relocations or an interpreter", result.stderr)
+                self.assertFalse(self.out.exists())
+        # Kernel modules legitimately carry relocations; only the loader forbids them.
+        module = relocated_loader()
+        struct.pack_into("<H", module, 16, 1)
+        self.ko.write_bytes(module)
+        (self.assets / "susfs_insmod").write_bytes(elf(3))
+        self.assertEqual(self.legacy().returncode, 0)
 
     def test_installer_stages_without_running_loader(self):
         module = self.work / "module"
