@@ -34,10 +34,13 @@ Artifacts contain:
 - separate build logs, also retained on failure.
 
 The upstream CFI call-site gate, architecture/vermagic/namespace checks and
-forbidden-import checks must pass. Host tests use mock commands and never load
-kernel code. [Run 39079657465](https://github.com/doccstat/susfs4ksu-lkm/actions/runs/39079657465)
+forbidden-import checks must pass. Build and packaging share an ELF check that
+rejects loader relocations or an interpreter: its `_start` provides neither.
+A native, freestanding error-path test exercises diagnostics and restoration with
+fake kernel-state IO; no test loads kernel code. [Run 39079657465](https://github.com/doccstat/susfs4ksu-lkm/actions/runs/39079657465)
 passed the real two-build gate for `5a1bc82d6bd5e163a18e72fc4305f00bad5bddbc`.
-Each later revision still needs its own successful run.
+That historical loader was later found to contain unapplied PIE relocations;
+**do not use it**. Each fixed revision needs its own successful run.
 
 Two identical outputs establish reproduction for those fixed inputs, **not**
 universal reproducibility across other kernels/toolchains, ABI compatibility,
@@ -66,6 +69,7 @@ Host checks, with disposable outputs under cache:
 export TMPDIR="$HOME/.cache/susfs4ksu-lkm/tests"
 export PYTHONDONTWRITEBYTECODE=1
 mkdir -p "$TMPDIR"
+ulimit -c 0
 python3 -m unittest discover -v -s tools -p 'test_build.py'
 python3 tools/test_pack.py
 python3 tools/test_load.py
@@ -73,6 +77,9 @@ cc -O1 -o "$TMPDIR/insmod_match_test" tools/insmod_match_test.c
 "$TMPDIR/insmod_match_test"
 cc -O1 -o "$TMPDIR/insmod_guard_test" tools/insmod_guard_test.c
 "$TMPDIR/insmod_guard_test" "$TMPDIR/susfs-load.lock"
+cc -O2 -nostdlib -static-pie -fno-stack-protector -fno-builtin -Wl,-e,_start \
+  -o "$TMPDIR/insmod_error_test" tools/insmod_error_test.c
+"$TMPDIR/insmod_error_test"
 ```
 
 ## Installable module ZIP
@@ -82,13 +89,14 @@ the **inner `*-module.zip`** before selecting it in a KernelSU-compatible manage
 The raw `susfs-android16-6.12-<commit>` artifact is still not an installer.
 
 To package an already verified raw build without rebuilding it, use a source
-checkout whose kernel, loader and module scripts match that build:
+checkout whose kernel, loader and module scripts match that build. Packaging
+requires `readelf` on `PATH`, as provided by the GitHub runner:
 
 ```sh
 python3 tools/pack_module.py \
   --build-artifacts "$HOME/.cache/susfs4ksu-lkm/verified-artifacts" \
-  --tag ci-5a1bc82d \
-  --out "$HOME/.cache/susfs4ksu-lkm/susfs-android16-6.12-ci-5a1bc82d-module.zip"
+  --tag ci-reviewed-build \
+  --out "$HOME/.cache/susfs4ksu-lkm/susfs-android16-6.12-ci-reviewed-build-module.zip"
 ```
 
 The packer checks complete input checksums, pinned build provenance, runtime
@@ -119,7 +127,10 @@ untouched `EINVAL` replies permit it. Denial, `ENOSYS`, silent success or lock
 failure refuse loading. A successful insertion must also produce a protocol
 reply. This is not a feature-health or compatibility check. Keep the lock inode;
 process death releases ownership without deleting it. Arbitrary other loaders
-do not participate in this lock.
+do not participate in this lock. The loader temporarily requests
+`kptr_restrict=1` (CAP_SYSLOG-gated) and attempts to restore the original value on
+normal exit. Crashes/SIGKILL can still leave it changed; lock release does not
+restore a sysctl.
 
 A framework-only restart retains the running kernel, KernelSU and any loaded
 SUSFS; repeated module stages therefore skip insertion. A full reboot discards

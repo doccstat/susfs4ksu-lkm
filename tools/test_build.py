@@ -53,7 +53,7 @@ for name in ('susfs_guard_lkm-android16-6.12.ko', 'susfs_insmod'):
 '''
 
 TOOLS = r'''
-import os, pathlib, sys
+import os, pathlib, struct, sys
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
 mode = os.environ.get('FAULT', '')
@@ -67,7 +67,10 @@ elif name == 'clang':
     if args == ['--version']:
         print('mock clang')
     else:
-        pathlib.Path(args[args.index('-o')+1]).write_bytes(b'mock loader')
+        loader = bytearray(64)
+        loader[:7] = b'\x7fELF\x02\x01\x01'
+        struct.pack_into('<HH', loader, 16, 3, 183)
+        pathlib.Path(args[args.index('-o')+1]).write_bytes(loader)
 elif name == 'readelf':
     machine = 'X86-64' if mode == 'architecture' else 'AArch64'
     print('Machine: ' + machine)
@@ -76,10 +79,17 @@ elif name == 'readelf':
     print('vermagic=' + release + ' SMP preempt mod_unload modversions aarch64')
     if mode != 'namespace':
         print('import_ns=VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver')
+    if args[-1] == 'out/susfs_insmod':
+        if mode == 'loader-relocations':
+            print('00002700  000000000403 R_AARCH64_RELATIVE  9d4')
+        if mode == 'loader-interpreter':
+            print('  INTERP  0x000000  0x000000')
 elif name == 'nm':
     if mode != 'empty-symbols':
         print(' U ' + ('kallsyms_lookup_name' if mode == 'forbidden-symbol' else 'fput'))
 elif name == 'python3':
+    if args[0] == '-c':
+        os.execv(sys.executable, [sys.executable, *args])
     assert args == ['tools/cfi_sites.py', '--allow',
                     'init_module,susfs_layers_down,susfs_tw_func,susfs_watch_freeing',
                     'kernel/susfs_guard_lkm.ko']
@@ -96,7 +106,7 @@ class BuildTests(unittest.TestCase):
         self.base = Path(self.tmp.name)
         self.repo = self.base / 'repo'
         self.repo.mkdir()
-        for name in ('tools/build-pinned.sh', 'tools/build-one.sh', 'config/build.env'):
+        for name in ('tools/build-pinned.sh', 'tools/build-one.sh', 'tools/pack_module.py', 'config/build.env'):
             path = self.repo / name
             path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, path)
@@ -190,7 +200,8 @@ class BuildTests(unittest.TestCase):
         result = self.run_build('build-one.sh', **env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for fault in ('make', 'clang', 'readelf', 'nm', 'python3', 'architecture',
-                      'vermagic', 'namespace', 'empty-symbols', 'forbidden-symbol'):
+                      'vermagic', 'namespace', 'empty-symbols', 'forbidden-symbol',
+                      'loader-relocations', 'loader-interpreter'):
             with self.subTest(fault=fault):
                 result = self.run_build('build-one.sh', FAULT=fault, **env)
                 self.assertNotEqual(result.returncode, 0, fault)

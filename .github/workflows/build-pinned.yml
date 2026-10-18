@@ -35,6 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          ulimit -c 0
           export PYTHONDONTWRITEBYTECODE=1
           export TMPDIR="$HOME/.cache/susfs4ksu-lkm/tests"
           mkdir -p "$TMPDIR"
@@ -46,6 +47,9 @@ jobs:
           "$TMPDIR/insmod_match_test"
           cc -O1 -o "$TMPDIR/insmod_guard_test" tools/insmod_guard_test.c
           "$TMPDIR/insmod_guard_test" "$TMPDIR/susfs-load.lock"
+          cc -O2 -nostdlib -static-pie -fno-stack-protector -fno-builtin -Wl,-e,_start \
+            -o "$TMPDIR/insmod_error_test" tools/insmod_error_test.c
+          "$TMPDIR/insmod_error_test"
       - name: Build twice and compare raw artifacts
         id: build
         run: bash tools/build-pinned.sh

@@ -32,8 +32,9 @@ python3 tools/cfi_sites.py \
 clang --target=aarch64-linux-gnu -O2 -nostdlib -static-pie \
   -fno-stack-protector -fno-builtin -fuse-ld=lld -Wl,-e,_start \
   -o out/susfs_insmod tools/susfs_insmod.c
-readelf -h -n out/susfs_insmod > out/loader-info.txt
+readelf -h -n -l -r -d -W out/susfs_insmod > out/loader-info.txt
 grep -Eq 'Machine:.*AArch64' out/loader-info.txt
+python3 -c 'from pathlib import Path; from tools.pack_module import check_elf; check_elf(Path("out/susfs_insmod"), 3)'
 cp "$ko" "out/susfs_guard_lkm-$KMI.ko"
 cp "$KDIR/.config" out/kernel.config
 cp "$KDIR/Module.symvers" out/Module.symvers
