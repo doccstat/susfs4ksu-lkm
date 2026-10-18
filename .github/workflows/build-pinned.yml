@@ -52,6 +52,18 @@ jobs:
           name: susfs-android16-6.12-${{ github.sha }}
           path: ${{ steps.build.outputs.work }}/artifacts/
           if-no-files-found: error
+      - name: Package the accepted build (no device operations)
+        run: |
+          python3 tools/pack_module.py \
+            --build-artifacts '${{ steps.build.outputs.work }}/artifacts' \
+            --tag 'ci-${{ github.sha }}' \
+            --out '${{ steps.build.outputs.work }}/installer/susfs-android16-6.12-${{ github.sha }}-module.zip'
+      - name: Upload installable experimental module
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
+        with:
+          name: susfs-module-android16-6.12-${{ github.sha }}
+          path: ${{ steps.build.outputs.work }}/installer/*.zip
+          if-no-files-found: error
       - name: Retain build diagnostics even on failure
         if: ${{ always() && steps.build.outputs.work != '' }}
         uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08
